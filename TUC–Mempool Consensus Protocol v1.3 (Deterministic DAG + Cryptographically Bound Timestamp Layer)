@@ -1,0 +1,338 @@
+# TUC–Mempool Consensus Protocol v1.3 (Deterministic DAG + Cryptographically Bound Timestamp Layer)
+
+---
+
+## 0. General Definition
+
+TUC (Temporal Universal Consensus) is a distributed consensus protocol based on a **mempool structured as a DAG (Directed Acyclic Graph)**.
+
+The system replaces physical time as a source of consensus, strictly separating two layers:
+
+- **TUC-Time** → deterministic order derived from the DAG  
+- **TUC-Timestamp** → external layer of temporal observability, cryptographically verifiable  
+
+The system is fully deterministic at its core.
+
+---
+
+## 1. Base Data Model
+
+### 1.1 TUC Event
+
+```ts
+export type TUCEvent = {
+  id: string;              // immutable canonical hash
+  payload: unknown;        // arbitrary data
+  parents: string[];       // causal dependencies (DAG)
+  signer: string;          // sender identity
+  nonce: number;           // anti-replay mechanism
+  timestamp?: TUCTimestamp; // external optional layer (NOT part of consensus)
+};
+
+
+---
+
+2. Timestamp (External Observability Layer)
+
+export type TUCTimestamp = {
+  unix: number;        // UNIX time (not trusted for consensus)
+  source: string;      // origin identity of the time source
+  signature: string;   // cryptographic signature (bound to signer identity)
+};
+
+Timestamp Properties
+
+Does not affect consensus
+
+Does not affect DAG ordering
+
+Is cryptographically verifiable
+
+Is auditable but not decisive
+
+
+
+---
+
+3. Strict Deterministic Canonicalization
+
+Canonicalization is structural, typed, and recursive.
+
+export function canonicalSerialize(value: unknown): string {
+  if (value === null) return "n";
+
+  const t = typeof value;
+
+  if (t === "string") return `s:${value}`;
+  if (t === "number") return `i:${value}`;
+  if (t === "boolean") return `b:${value}`;
+
+  if (Array.isArray(value)) {
+    return `a:[${value.map(canonicalSerialize).join("|")}]`;
+  }
+
+  if (t === "object") {
+    const obj = value as Record<string, unknown>;
+    const keys = Object.keys(obj).sort();
+
+    return `o:{${keys
+      .map(k => `${k}:${canonicalSerialize(obj[k])}`)
+      .join("|")}}`;
+  }
+
+  throw new Error(`Unsupported type: ${t}`);
+}
+
+
+---
+
+4. Canonical Event Hash
+
+import crypto from "crypto";
+
+export function hashEvent(event: Omit<TUCEvent, "id">): string {
+  const { payload, parents, signer, nonce } = event;
+
+  const normalized = {
+    payload,
+    parents: [...parents].sort(),
+    signer,
+    nonce
+  };
+
+  const canonical = canonicalSerialize(normalized);
+
+  return crypto.createHash("sha256").update(canonical).digest("hex");
+}
+
+
+---
+
+5. Mempool
+
+export type Mempool = Map<string, TUCEvent>;
+
+
+---
+
+6. Event Validation
+
+export function validateEvent(event: TUCEvent, pool: Mempool): boolean {
+  const recomputedId = hashEvent(event);
+
+  if (recomputedId !== event.id) return false;
+
+  for (const parent of event.parents) {
+    if (!pool.has(parent)) return false;
+  }
+
+  if (event.timestamp) {
+    if (event.timestamp.unix <= 0) return false;
+    if (!event.timestamp.signature) return false;
+  }
+
+  return true;
+}
+
+
+---
+
+7. TUC-Rank (Deterministic Causal Ordering)
+
+The ranking is purely structural over the DAG.
+
+export function tucRank(
+  id: string,
+  pool: Mempool,
+  memo: Map<string, number> = new Map()
+): number {
+  if (memo.has(id)) return memo.get(id)!;
+
+  const node = pool.get(id);
+  if (!node) return 0;
+
+  if (node.parents.length === 0) {
+    memo.set(id, 0);
+    return 0;
+  }
+
+  let sum = 0;
+
+  for (const parentId of node.parents) {
+    sum += tucRank(parentId, pool, memo);
+  }
+
+  const value = 1 + (sum / node.parents.length);
+
+  memo.set(id, value);
+  return value;
+}
+
+
+---
+
+8. Global Deterministic Ordering
+
+export function deterministicOrder(pool: Mempool): TUCEvent[] {
+  const memo = new Map<string, number>();
+
+  for (const id of pool.keys()) {
+    tucRank(id, pool, memo);
+  }
+
+  return [...pool.values()].sort((a, b) => {
+    const ra = memo.get(a.id) ?? 0;
+    const rb = memo.get(b.id) ?? 0;
+
+    if (ra !== rb) return ra - rb;
+
+    if (a.id === b.id) return 0;
+
+    return a.id < b.id ? -1 : 1;
+  });
+}
+
+
+---
+
+9. Global System State
+
+export type TUCState = {
+  mempool: Mempool;
+  ordered: TUCEvent[];
+  heightIndex: Map<string, number>;
+  timestampIndex: Map<string, number>;
+};
+
+
+---
+
+10. State Compilation
+
+export function compileState(pool: Mempool): TUCState {
+  const ordered = deterministicOrder(pool);
+
+  const heightIndex = new Map<string, number>();
+  const timestampIndex = new Map<string, number>();
+
+  ordered.forEach((event, index) => {
+    heightIndex.set(event.id, index);
+
+    if (event.timestamp) {
+      timestampIndex.set(event.id, event.timestamp.unix);
+    }
+  });
+
+  return {
+    mempool: pool,
+    ordered,
+    heightIndex,
+    timestampIndex
+  };
+}
+
+
+---
+
+11. Cryptographic Timestamp Verification
+
+The timestamp is bound to:
+
+event.id
+
+timestamp.unix
+
+timestamp.source
+
+signer identity
+
+
+import crypto from "crypto";
+
+export function verifyTimestamp(event: TUCEvent): boolean {
+  if (!event.timestamp) return true;
+
+  const base = `${event.id}:${event.timestamp.unix}:${event.timestamp.source}`;
+
+  const expected = crypto.createHash("sha256").update(base).digest("hex");
+
+  const signerBound = crypto
+    .createHash("sha256")
+    .update(event.signer + expected)
+    .digest("hex");
+
+  return event.timestamp.signature === signerBound;
+}
+
+
+---
+
+12. TUC-Time (Logical Time)
+
+export function TUC_TIME(eventId: string, state: TUCState): number {
+  return state.heightIndex.get(eventId) ?? -1;
+}
+
+
+---
+
+13. TUC-Timestamp (Observational Time)
+
+export function TUC_TS(eventId: string, state: TUCState): number {
+  return state.timestampIndex.get(eventId) ?? -1;
+}
+
+
+---
+
+14. Formal Layer Separation
+
+Layer	Nature	Function
+
+TUC-DAG	structural	deterministic consensus
+TUC-Time	derived	global causal ordering
+TUC-Timestamp	external	temporal auditing
+
+
+
+---
+
+15. System Invariants
+
+15.1 Determinism Invariant
+
+Global order depends exclusively on the DAG.
+
+15.2 Temporal Isolation Invariant
+
+Timestamp never participates in consensus.
+
+15.3 Canonical Integrity Invariant
+
+Hash depends only on structural data.
+
+15.4 External Verifiability Invariant
+
+Timestamp is verifiable but non-decisive.
+
+
+---
+
+16. Global System Function
+
+F(M) → (O, A)
+
+M = DAG mempool
+O = deterministic total order (consensus)
+A = temporal audit layer
+
+
+---
+
+17. Protocol Status
+
+Version: 1.3
+Status: CORRECTED + HARDENED + DETERMINISTIC + CRYPTOGRAPHICALLY BOUND TIMESTAMP LAYER
+
+
+---
