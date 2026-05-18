@@ -139,3 +139,136 @@ If interpreted as storage → it gets underestimated
 If interpreted as an operating system → its real scope is understood  
 
 Conceptual precision here is not optional — it is structural.
+
+
+## Deterministic HD Structure Method
+
+This system adopts a Hierarchical Deterministic (HD) structure as the core method to organize, derive, and resolve states within canonical storage. Inspired by HD wallet models (e.g., BIP32/BIP39), it extends the concept beyond keys into a generalized deterministic state space.
+
+---
+
+### 1. Root of Determinism
+
+The system starts from a single deterministic root:
+
+- Seed (e.g., BIP39 mnemonic or equivalent entropy)
+- Root key / root state
+
+This root defines the entire possible state space. Every derived state is a deterministic function of this origin.
+
+---
+
+### 2. Hierarchical Derivation
+
+States are derived using structured paths:
+
+m / layer / domain / state / version / ...
+
+Each level represents a semantic or functional dimension of the system:
+
+- **layer** → system layer (identity, storage, execution, etc.)
+- **domain** → logical grouping or namespace
+- **state** → specific state definition
+- **version** → immutable state versioning
+
+This creates a tree of deterministic states.
+
+---
+
+### 3. Path as State Definition
+
+A derivation path is not just a locator — it *defines the state*.
+
+- The path encodes meaning
+- The path determines execution context
+- The path constrains valid transitions
+
+Example:
+
+m/identity/user/123/profile/v1
+
+This is not a file path — it is a **state identity within the system**.
+
+---
+
+### 4. Canonicalization + Hash Anchoring
+
+Each derived state must:
+
+1. Be transformed into canonical form  
+2. Produce a deterministic hash  
+
+This results in:
+
+- Unique state identity  
+- Verifiable integrity  
+- Content-addressable resolution  
+
+---
+
+### 5. Deterministic Evaluation
+
+State resolution follows:
+
+R = f(C, T, S, P)
+
+Where:
+
+- R → resolved state route  
+- C → configuration  
+- T → storage type  
+- S → subtype  
+- P → derivation path  
+
+The system does not “search” — it **derives and resolves deterministically**.
+
+---
+
+### 6. Mempool Integration
+
+The mempool governs the valid state space over the HD structure:
+
+- Defines which branches are valid  
+- Restricts invalid or non-canonical paths  
+- Controls state existence rules  
+
+This means:
+
+- Not all possible derivations are valid  
+- Validity is determined by mempool rules  
+
+---
+
+### 7. Key Properties
+
+- **Deterministic expansion**  
+  Entire state space is derivable from a root
+
+- **Structured composability**  
+  Paths create modular and extensible systems
+
+- **No ambiguity**  
+  Same input → same path → same state
+
+- **Traceability**  
+  Every state can be traced back to its origin
+
+---
+
+### 8. Critical Clarification
+
+This is not:
+
+- A wallet derivation system  
+- A key management scheme  
+
+This is:
+
+- A **generalized deterministic state derivation model**  
+- A **logical execution structure over storage**  
+
+---
+
+### Author Statement
+
+> “HD derivation is not just for keys — it is a universal structure for deterministic state systems.” — LAEV
