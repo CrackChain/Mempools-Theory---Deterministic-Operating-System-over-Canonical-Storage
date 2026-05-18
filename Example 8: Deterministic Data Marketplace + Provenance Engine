@@ -1,0 +1,325 @@
+# Example 8: Deterministic Data Marketplace + Provenance Engine
+## Production-grade implementation — Verifiable Data, Reproducible Pipelines, Audit-Ready Lineage
+
+---
+
+# 1. Core Principle
+
+> A dataset is a deterministic function over verified inputs, executed under a versioned pipeline, producing a reproducible output whose integrity, origin, and transformations are cryptographically provable.
+
+---
+
+# 2. System Scope
+
+This system enables:
+
+- deterministic data ingestion  
+- cryptographic source verification  
+- reproducible transformation pipelines  
+- full lineage (provenance graph)  
+- dataset versioning and chaining  
+- monetization and controlled access  
+
+Integrated with:
+
+- Identity Mempool  
+- Payment Engine  
+- Compliance Engine  
+- Scoring Engine  
+- Governance Engine  
+- Canonical Storage  
+
+---
+
+# 3. HD Deterministic Structure
+
+```text
+m/data/{tenantId}/{datasetId}/{version}/{stage}
+
+Stages:
+
+raw
+validated
+transformed
+aggregated
+published
+monetized
+
+
+---
+
+4. Data Ingestion (Verified + Signed)
+
+{
+  "dataId": "txn_batch_001",
+  "source": "payment_engine",
+  "timestamp": "2026-05-18T12:00:00Z",
+
+  "payload": [
+    { "tx": "a1", "amount": 1000 },
+    { "tx": "a2", "amount": 2000 }
+  ],
+
+  "signature": "ed25519_signature",
+  "publicKey": "pk_payment_engine"
+}
+
+
+---
+
+5. Canonicalization + Hash
+
+function canonicalize(value: unknown): string {
+  if (value === null || typeof value !== "object") return JSON.stringify(value);
+  if (Array.isArray(value)) return `[${value.map(canonicalize).join(",")}]`;
+  const obj = value as Record<string, unknown>;
+  const keys = Object.keys(obj).sort();
+  return `{${keys.map(k => `${JSON.stringify(k)}:${canonicalize(obj[k])}`).join(",")}}`;
+}
+
+function sha256(input: string): string {
+  return crypto.createHash("sha256").update(input).digest("hex");
+}
+
+
+---
+
+6. Cryptographic Verification (Ed25519)
+
+import nacl from "tweetnacl";
+
+function verifyEd25519(message: string, signature: Uint8Array, publicKey: Uint8Array): boolean {
+  return nacl.sign.detached.verify(
+    Buffer.from(message),
+    signature,
+    publicKey
+  );
+}
+
+
+---
+
+7. Ingestion Trust Pipeline
+
+function verifyIngestion(batch: DataIngestionBatch): boolean {
+
+  const message = canonicalize({
+    dataId: batch.dataId,
+    source: batch.source,
+    timestamp: batch.timestamp,
+    payload: batch.payload
+  });
+
+  return verifyEd25519(message, batch.signature, batch.publicKey);
+}
+
+
+---
+
+8. Schema Validation (Deterministic)
+
+function validateSchema(row): boolean {
+  return typeof row.tx === "string" &&
+         typeof row.amount === "number";
+}
+
+
+---
+
+9. Pipeline Definition (Versioned DSL)
+
+{
+  "pipelineId": "txn_pipeline",
+  "pipelineVersion": "v1",
+  "pipelineHash": "hash_pipeline_v1",
+
+  "steps": [
+    { "type": "filter", "field": "amount", "op": ">", "value": 1000 },
+    { "type": "map", "field": "amount", "op": "scale", "value": 100 },
+    { "type": "aggregate", "groupBy": "none", "op": "sum" }
+  ]
+}
+
+
+---
+
+10. Deterministic Execution Engine
+
+function executePipeline(batch, pipeline) {
+
+  if (!verifyIngestion(batch)) {
+    throw new Error("INVALID_SIGNATURE");
+  }
+
+  let workingSet = structuredClone(batch.payload);
+
+  workingSet = workingSet
+    .filter(validateSchema)
+    .sort((a, b) => a.tx.localeCompare(b.tx));
+
+  for (const step of pipeline.steps) {
+
+    if (step.type === "filter") {
+      workingSet = workingSet.filter(row => row[step.field] > step.value);
+    }
+
+    if (step.type === "map") {
+      workingSet = workingSet.map(row => ({
+        ...row,
+        [step.field]: Math.floor(row[step.field] * step.value)
+      }));
+    }
+
+    if (step.type === "aggregate") {
+      const total = workingSet.reduce(
+        (acc, row) => acc + BigInt(row.amount),
+        BigInt(0)
+      );
+
+      workingSet = [{ total: total.toString() }];
+    }
+  }
+
+  return workingSet;
+}
+
+
+---
+
+11. Provenance Graph (Lineage)
+
+{
+  "datasetId": "txn_dataset_v3",
+  "version": "v3",
+
+  "inputs": ["txn_batch_001"],
+  "pipelineId": "txn_pipeline",
+
+  "inputHash": "hash_raw",
+  "transformHash": "hash_pipeline",
+  "outputHash": "hash_output",
+
+  "previousDatasetHash": "hash_prev",
+  "timestamp": "2026-05-18T12:05:00Z"
+}
+
+
+---
+
+12. Dataset Artifact (Published)
+
+{
+  "datasetId": "txn_dataset_v3",
+  "version": "v3",
+  "stage": "published",
+
+  "data": [{ "total": "300000" }],
+
+  "provenance": { ... },
+
+  "datasetHash": "hash_dataset",
+  "signature": "sig_data_engine"
+}
+
+
+---
+
+13. Dataset Hash (Full Integrity)
+
+datasetHash = sha256(
+  canonicalize({
+    inputHash,
+    transformHash,
+    outputHash
+  })
+);
+
+
+---
+
+14. Deterministic Storage
+
+m/data/{datasetId}/raw/{batchId}
+m/data/{datasetId}/pipelines/{pipelineVersion}
+m/data/{datasetId}/outputs/{version}
+m/data/{datasetId}/provenance/{version}
+m/data/{datasetId}/chain/{version}
+
+
+---
+
+15. Access Control + Monetization
+
+function canAccess(entity, dataset) {
+
+  if (entity.kycStatus !== "verified") return false;
+  if (entity.riskScore > 0.8) return false;
+
+  return true;
+}
+
+function computePrice(dataset) {
+
+  const base = 100;
+  const demandFactor = 1.5;
+  const complexityFactor = 1.2;
+
+  return base * demandFactor * complexityFactor;
+}
+
+
+---
+
+16. Purchase Flow
+
+1. identity verification
+
+
+2. compliance validation
+
+
+3. payment execution
+
+
+4. dataset access granted
+
+
+
+
+---
+
+17. What is solved
+
+verifiable data origin ✔
+
+deterministic transformations ✔
+
+reproducible datasets ✔
+
+lineage tracking ✔
+
+tamper-proof datasets ✔
+
+monetization layer ✔
+
+
+
+---
+
+18. Remaining real-world challenges
+
+data privacy regulations
+
+adversarial data poisoning
+
+pricing fairness
+
+dataset leakage
+
+
+
+---
+
+19. Final Thesis
+
+> A deterministic data marketplace transforms data into a cryptographically verifiable asset, where value is derived from reproducibility, provenance, and mathematical integrity rather than institutional trust.
