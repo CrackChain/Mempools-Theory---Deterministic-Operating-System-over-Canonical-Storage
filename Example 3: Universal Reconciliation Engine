@@ -1,0 +1,458 @@
+# Example 3: Universal Reconciliation Universal
+## Full realistic implementation for payments, banks, internal ledger, and external sources
+
+This example defines a deterministic reconciliation infrastructure capable of comparing and resolving differences across multiple financial sources using:
+
+- HD-derived reconciliation paths  
+- canonical storage  
+- cryptographic signing of events  
+- persistent idempotency  
+- event queues  
+- distributed processing  
+- controlled eventual consistency  
+- automatic discrepancy classification  
+- compensating ledger entries  
+- full traceability  
+
+Core thesis:
+
+> reconciliation should not be a manual afterthought; it must be a structural property of the system.
+
+---
+
+# 1. System purpose
+
+The system addresses a real operational problem:
+
+- a payment is captured by a PSP  
+- the bank settles later with drift  
+- the internal ledger records a slightly different version  
+- fees differ  
+- timestamps don’t align  
+
+→ finance teams reconcile manually.
+
+This engine converts that into a deterministic comparison and resolution system.
+
+---
+
+# 2. What the system does
+
+1. ingests events from multiple sources  
+2. canonicalizes each payload  
+3. signs or verifies it  
+4. assigns it to an HD path  
+5. computes stable hashes  
+6. correlates related events  
+7. compares states  
+8. classifies discrepancies  
+9. resolves automatically or flags for review  
+10. stores full evidence  
+
+---
+
+# 3. Supported sources
+
+## 3.1 Typical sources
+- PSPs: Stripe, Adyen, Checkout  
+- banks: settlement files  
+- internal ledger  
+- crypto settlement  
+- ERP systems  
+- billing systems  
+
+## 3.2 Rule
+No single source is absolute truth.
+
+Truth is domain-specific:
+
+- captured amount → PSP  
+- final settlement → bank  
+- accounting → ledger  
+- audit → canonical signed evidence  
+
+---
+
+# 4. Domain model
+
+## 4.1 Core entities
+
+- tenant  
+- organization  
+- merchant  
+- source_system  
+- external_event  
+- internal_event  
+- canonical_record  
+- reconciliation_case  
+- reconciliation_run  
+- discrepancy  
+- resolution_action  
+- ledger_adjustment  
+- outbox_event  
+- inbox_event  
+- dead_letter_event  
+
+---
+
+# 5. HD deterministic structure
+
+## 5.1 Path convention
+
+```text
+m/reconcile/{tenantId}/{orgId}/{sourceSystem}/{paymentId}/{domain}/{version}
+
+5.2 Example
+
+m/reconcile/tenant-a/acme/stripe/pay_9f2a/payment/v1
+m/reconcile/tenant-a/acme/bank/pay_9f2a/settlement/v1
+m/reconcile/tenant-a/acme/ledger/pay_9f2a/accounting/v1
+
+
+---
+
+6. Canonical storage
+
+All events are normalized before persistence.
+
+6.1 Rules
+
+sorted keys
+
+normalized strings
+
+UTC timestamps
+
+normalized numbers
+
+no ambiguity
+
+
+6.2 Example
+
+Input:
+
+{
+  "amount": 100.00,
+  "currency": "USD",
+  "reference": "PAY_9f2a",
+  "status": "settled"
+}
+
+Canonical:
+
+{"amount":100,"currency":"USD","reference":"PAY_9f2a","status":"settled"}
+
+6.3 Hash
+
+contentHash = sha256(canonicalJson)
+
+
+---
+
+7. Cryptographic signing
+
+Each event must be signed or verifiable.
+
+Purpose:
+
+authenticity
+
+integrity
+
+non-repudiation
+
+
+
+---
+
+8. Persistent idempotency
+
+8.1 Key
+
+tenantId + orgId + sourceSystem + externalEventId
+
+8.2 Behavior
+
+no duplicates
+
+same result returned
+
+no double reconciliation
+
+
+
+---
+
+9. Full reconciliation flow
+
+9.1 Ingestion
+
+{
+  "tenantId": "tenant-a",
+  "orgId": "acme",
+  "sourceSystem": "stripe",
+  "externalEventId": "evt_001",
+  "paymentId": "pay_9f2a",
+  "amount": 100,
+  "currency": "USD",
+  "status": "captured"
+}
+
+9.2 Canonicalization
+
+Normalize + hash.
+
+9.3 Correlation
+
+Find matching:
+
+internal ledger entry
+
+bank settlement
+
+previous records
+
+
+9.4 Matching
+
+Compare:
+
+amount
+
+currency
+
+status
+
+reference
+
+timestamps
+
+
+9.5 Classification
+
+exact_match
+
+partial_match
+
+timing_mismatch
+
+material_mismatch
+
+orphan_internal
+
+orphan_external
+
+
+9.6 Resolution
+
+reconcile
+
+open case
+
+adjust ledger
+
+manual review
+
+
+
+---
+
+10. Discrepancy types
+
+exact_match
+
+partial_match
+
+timing_mismatch
+
+material_mismatch
+
+orphan_internal
+
+orphan_external
+
+
+
+---
+
+11. Resolution rules
+
+timing → no financial change
+
+partial → wait or review
+
+material → adjustment required
+
+orphan → investigation
+
+
+
+---
+
+12. Reconciliation case
+
+{
+  "caseId": "rc_001",
+  "paymentId": "pay_9f2a",
+  "status": "open",
+  "discrepancyType": "material_mismatch",
+  "delta": -0.02
+}
+
+
+---
+
+13. Ledger adjustment
+
+{
+  "adjustmentId": "adj_001",
+  "paymentId": "pay_9f2a",
+  "amount": 0.02,
+  "currency": "USD"
+}
+
+
+---
+
+14. Event sourcing & consistency
+
+events are immutable
+
+nodes converge eventually
+
+causal ordering enforced
+
+
+
+---
+
+15. Outbox / Inbox / DLQ
+
+outbox → publish safely
+
+inbox → deduplicate
+
+DLQ → store failures
+
+
+
+---
+
+16. Observability
+
+Metrics:
+
+match rate
+
+mismatch rate
+
+reconciliation latency
+
+DLQ rate
+
+
+Logs:
+
+traceId
+
+eventId
+
+caseId
+
+
+
+---
+
+17. Architecture
+
+Services:
+
+ingestion-service
+
+matching-engine
+
+case-manager
+
+resolution-service
+
+ledger-adjustment-service
+
+observability-service
+
+
+
+---
+
+18. Database schema
+
+source_events
+
+event_id
+tenant_id
+org_id
+source_system
+content_hash
+
+reconciliation_cases
+
+case_id
+payment_id
+status
+delta_amount
+
+
+---
+
+19. TypeScript implementation
+
+// same implementation as previous version
+
+
+---
+
+20. Real scenario
+
+Stripe: 100 USD
+Bank: 97.98 USD
+Ledger: 98 USD
+
+Result:
+
+match on capture
+
+mismatch on settlement
+
+adjustment required
+
+
+
+---
+
+21. Monetization
+
+reconciliation-as-a-service
+
+enterprise audit tooling
+
+financial control layer
+
+
+
+---
+
+22. What this proves
+
+deterministic reconciliation
+
+multi-source truth alignment
+
+auditable financial state
+
+
+
+---
+
+23. Final thesis
+
+> Universal reconciliation is not a back-office task; it is a deterministic infrastructure that converts multiple financial sources into a single verifiable state.
