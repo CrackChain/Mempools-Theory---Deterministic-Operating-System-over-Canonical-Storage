@@ -1,0 +1,737 @@
+# Example 2: Deterministic Ledger-as-a-Service
+## Double-entry accounting over canonical storage with HD derivation, signing, reconciliation, and state governance
+
+This example defines a deterministic accounting infrastructure designed for companies, fintechs, and payment systems that require:
+
+- full traceability of journal entries,
+- HD-derived accounts and ledgers,
+- canonicalization of every movement before persistence,
+- cryptographic signing of each event,
+- strict tenant isolation,
+- reconciliation against external sources,
+- and immutable, auditable history.
+
+The core thesis is:
+
+> accounting is not just storage of movements; it is a system of financially governed deterministic states.
+
+---
+
+# 1. System purpose
+
+The system transforms distributed financial operations into **verifiable and reproducible accounting**.
+
+Operationally, the system:
+
+1. receives a financial operation,
+2. validates permissions and jurisdiction,
+3. derives the correct accounting path,
+4. canonicalizes the payload,
+5. computes a stable hash,
+6. signs the event,
+7. writes double-entry records,
+8. emits events to queues,
+9. and reconciles balances against internal or external sources.
+
+---
+
+# 2. What makes this ledger different
+
+A traditional ledger stores:
+
+- debit,
+- credit,
+- amount,
+- date,
+- reference.
+
+That is necessary, but insufficient for a deterministic financial system.
+
+This Ledger-as-a-Service adds:
+
+- **HD derivation for ledgers and accounts**,
+- **canonicalization of entries**,
+- **content-addressed hashing**,
+- **event-level signatures**,
+- **persistent idempotency**,
+- **outbox/inbox patterns**,
+- **dead-letter queue (DLQ)**,
+- **automated reconciliation**,
+- **tenant and jurisdiction policies**,
+- and **immutable state versioning**.
+
+---
+
+# 3. Domain model
+
+## 3.1 Core entities
+
+- `tenant`
+- `organization`
+- `merchant`
+- `ledger`
+- `account`
+- `journal_entry`
+- `ledger_entry`
+- `ledger_state`
+- `reconciliation_run`
+- `balance_snapshot`
+- `policy`
+- `compliance_rule`
+- `actor`
+- `outbox_event`
+- `inbox_event`
+- `dead_letter_event`
+
+## 3.2 Accounting objects
+
+### Journal entry
+Represents the original accounting intent.
+
+### Ledger entry
+Represents the validated and persisted accounting record.
+
+### Balance snapshot
+Represents the state of an account at a point in time.
+
+### Reconciliation run
+Represents a comparison between internal and external balances.
+
+---
+
+# 4. Deterministic HD structure
+
+The path does not just organize; it defines existence and versioning.
+
+## 4.1 Path convention
+
+```text
+m/ledger/{tenantId}/{orgId}/{ledgerId}/{accountId}/{entryType}/{version}
+
+4.2 Example
+
+m/ledger/tenant-a/acme/main-ledger/cash-usd/debit/v1
+m/ledger/tenant-a/acme/main-ledger/merchant-payable/credit/v1
+m/ledger/tenant-a/acme/main-ledger/revenue/credit/v1
+m/ledger/tenant-a/acme/main-ledger/fees/debit/v1
+
+4.3 Meaning
+
+tenantId: isolation boundary,
+
+orgId: organization,
+
+ledgerId: logical book,
+
+accountId: account,
+
+entryType: debit/credit,
+
+version: immutable version.
+
+
+
+---
+
+5. Canonical storage
+
+All entries must be normalized before persistence.
+
+5.1 Canonicalization rules
+
+lexicographic key ordering,
+
+string normalization,
+
+UTC timestamps,
+
+numeric normalization,
+
+no duplicate keys,
+
+no implicit fields,
+
+deterministic representation.
+
+
+5.2 Input example
+
+{
+  "currency": "USD",
+  "amount": 100.0,
+  "accountId": "cash-usd",
+  "reference": "PAY_9f2a",
+  "note": "  sale payment "
+}
+
+5.3 Canonical output
+
+{"accountId":"cash-usd","amount":100,"currency":"USD","note":"sale payment","reference":"PAY_9f2a"}
+
+5.4 Hash
+
+contentHash = sha256(canonicalJson)
+
+This hash uniquely identifies the entry.
+
+
+---
+
+6. Double-entry accounting
+
+6.1 Structural rule
+
+Every operation must balance:
+
+one debit,
+
+one credit,
+
+same magnitude,
+
+same currency.
+
+
+6.2 Example: 100 USD captured payment
+
+Entry 1
+
+Debit: cash-in-transit 100
+
+Credit: merchant-payable 100
+
+
+Entry 2
+
+Debit: merchant-payable 2
+
+Credit: revenue 2
+
+
+Entry 3
+
+Debit: merchant-payable 98
+
+Credit: merchant-settlement-clearing 98
+
+
+
+---
+
+7. Tenant-based accounting model
+
+7.1 Isolation
+
+tenants cannot see each other,
+
+ledgers do not mix organizations,
+
+accounts are not shared without explicit policy,
+
+entries do not cross boundaries without authorization.
+
+
+7.2 Claims
+
+{
+  "sub": "accountant_001",
+  "tenantId": "tenant-a",
+  "orgId": "acme",
+  "roles": ["ledger_writer", "reconciliation_agent"],
+  "scopes": [
+    "ledger:write",
+    "ledger:read",
+    "ledger:reconcile",
+    "ledger:snapshot"
+  ]
+}
+
+
+---
+
+8. Full accounting flow
+
+8.1 Input
+
+{
+  "tenantId": "tenant-a",
+  "orgId": "acme",
+  "ledgerId": "main-ledger",
+  "reference": "PAY_9f2a",
+  "description": "Customer payment",
+  "currency": "USD",
+  "amount": 100,
+  "entries": [
+    { "accountId": "cash-in-transit", "side": "debit", "amount": 100 },
+    { "accountId": "merchant-payable", "side": "credit", "amount": 100 }
+  ]
+}
+
+8.2 Process
+
+1. authenticate,
+
+
+2. validate scopes,
+
+
+3. validate jurisdiction,
+
+
+4. validate balance,
+
+
+5. derive HD path,
+
+
+6. canonicalize,
+
+
+7. hash,
+
+
+8. sign,
+
+
+9. persist,
+
+
+10. emit outbox,
+
+
+11. update snapshots.
+
+
+
+
+---
+
+9. Ledger state
+
+9.1 States
+
+open
+
+posting
+
+posted
+
+reconciling
+
+reconciled
+
+adjustment_required
+
+adjusted
+
+locked
+
+closed
+
+archived
+
+
+9.2 Rule
+
+Closed periods cannot be modified. Only compensating entries are allowed.
+
+
+---
+
+10. Persistent idempotency
+
+10.1 Key
+
+tenantId + orgId + ledgerId + reference + operationType + idempotencyKey
+
+10.2 Result
+
+Repeated requests:
+
+do not duplicate entries,
+
+do not affect balances,
+
+return the same result.
+
+
+
+---
+
+11. Cryptographic signing
+
+11.1 Algorithm
+
+Ed25519
+
+HSM/KMS custody
+
+
+11.2 Scope
+
+canonical payload only.
+
+
+11.3 Purpose
+
+integrity,
+
+authenticity,
+
+non-repudiation,
+
+distributed trust.
+
+
+
+---
+
+12. Outbox / Inbox / DLQ
+
+12.1 Outbox
+
+Events are stored alongside the transaction.
+
+12.2 Inbox
+
+Consumers track processed events.
+
+12.3 DLQ
+
+Irrecoverable events are stored with failure reasons.
+
+
+---
+
+13. Reconciliation engine
+
+13.1 Sources
+
+bank statements,
+
+PSPs,
+
+crypto settlement,
+
+ERP,
+
+internal systems.
+
+
+13.2 Outcomes
+
+exact_match
+
+partial_match
+
+timing_mismatch
+
+material_mismatch
+
+orphan_internal
+
+orphan_external
+
+
+13.3 Rule
+
+No silent corrections. Differences produce adjustments or review.
+
+
+---
+
+14. Balance snapshots
+
+14.1 Example
+
+{
+  "tenantId": "tenant-a",
+  "orgId": "acme",
+  "ledgerId": "main-ledger",
+  "accountId": "merchant-payable",
+  "currency": "USD",
+  "balance": 9820,
+  "snapshotAt": "2026-05-18T18:00:00Z"
+}
+
+
+---
+
+15. Jurisdictional compliance
+
+Policies evaluate:
+
+country,
+
+entity type,
+
+amount,
+
+currency,
+
+AML/KYC,
+
+reporting.
+
+
+
+---
+
+16. Reversals and adjustments
+
+No historical mutation.
+
+Incorrect entries are corrected via:
+
+reversal,
+
+compensation,
+
+adjustment.
+
+
+
+---
+
+17. Service architecture
+
+auth-service
+
+policy-service
+
+hsm-signing-service
+
+canonicalizer-service
+
+hash-service
+
+ledger-service
+
+reconciliation-service
+
+snapshot-service
+
+outbox-worker
+
+inbox-worker
+
+dlq-service
+
+audit-service
+
+reporting-service
+
+
+
+---
+
+18. Minimal database schema
+
+ledgers
+
+ledger_id
+tenant_id
+org_id
+name
+status
+created_at
+updated_at
+
+accounts
+
+account_id
+tenant_id
+org_id
+ledger_id
+name
+account_type
+currency
+status
+created_at
+
+journal_entries
+
+journal_entry_id
+tenant_id
+org_id
+ledger_id
+reference
+description
+amount
+currency
+canonical_json
+content_hash
+signature
+signer_public_key
+idempotency_key
+created_at
+
+ledger_entries
+
+ledger_entry_id
+journal_entry_id
+account_id
+side
+amount
+currency
+created_at
+
+balance_snapshots
+
+snapshot_id
+tenant_id
+org_id
+ledger_id
+account_id
+currency
+balance
+snapshot_at
+content_hash
+created_at
+
+reconciliation_runs
+
+reconciliation_run_id
+tenant_id
+org_id
+ledger_id
+source_system
+status
+matched_count
+mismatch_count
+created_at
+completed_at
+
+outbox_events
+
+event_id
+tenant_id
+aggregate_id
+event_type
+payload_json
+payload_hash
+signature
+status
+published_at
+created_at
+
+inbox_events
+
+event_id
+consumer_id
+processed_at
+status
+
+dlq_events
+
+dlq_id
+event_id
+reason
+payload_hash
+payload_json
+created_at
+
+
+---
+
+19. End-to-end example
+
+19.1 Sale
+
+Input:
+
+{
+  "tenantId": "tenant-a",
+  "orgId": "acme",
+  "ledgerId": "main-ledger",
+  "reference": "PAY_9f2a",
+  "description": "Customer sale",
+  "amount": 100,
+  "currency": "USD",
+  "entries": [
+    { "accountId": "cash-in-transit", "side": "debit", "amount": 100 },
+    { "accountId": "merchant-payable", "side": "credit", "amount": 100 }
+  ]
+}
+
+Process:
+
+validated,
+
+canonicalized,
+
+hashed,
+
+signed,
+
+persisted,
+
+published.
+
+
+
+---
+
+19.2 Fee
+
+{
+  "reference": "FEE_PAY_9f2a",
+  "amount": 2,
+  "currency": "USD",
+  "entries": [
+    { "accountId": "merchant-payable", "side": "debit", "amount": 2 },
+    { "accountId": "revenue", "side": "credit", "amount": 2 }
+  ]
+}
+
+
+---
+
+19.3 Reconciliation
+
+compare internal vs bank,
+
+mark reconciled or create adjustment.
+
+
+
+---
+
+20. TypeScript skeleton
+
+// (same structure as previous, unchanged)
+
+
+---
+
+21. What this proves
+
+This system behaves as:
+
+a verifiable accounting engine,
+
+a deterministic financial state layer,
+
+an auditable infrastructure.
+
+
+
+---
+
+22. Next layer
+
+multi-node replication,
+
+causal ordering,
+
+regulatory exports,
+
+audit evidence bundles.
+
+
+
+---
+
+23. Final thesis
+
+> A deterministic Ledger-as-a-Service over canonical storage with HD derivation, cryptographic signing, reconciliation, and multi-tenant accounting control.
