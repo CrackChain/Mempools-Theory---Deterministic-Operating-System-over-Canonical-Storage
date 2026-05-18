@@ -1,0 +1,416 @@
+# Example 4: Deterministic Off-Chain Smart Contract Engine
+## Production-grade implementation with verified inputs, signed runtime, dispute model, and legal evidence
+
+This version corrects the previous design by adding:
+
+- signed and reproducible runtime context  
+- verified input chain (trust model)  
+- deterministic multi-signature orchestration  
+- privacy-preserving canonical storage  
+- dispute and legal override flows  
+- versioned execution model  
+- integration with reconciliation evidence  
+
+Core thesis (refined):
+
+> a contract is a deterministic state machine whose execution is only as valid as the cryptographic trust chain of its inputs.
+
+---
+
+# 1. System boundaries (strict)
+
+The engine **does not trust raw events**.
+
+It only accepts:
+
+- verified events  
+- signed evidence bundles  
+- deterministic runtime context  
+
+---
+
+# 2. End-to-end trust pipeline
+
+```text
+External Source (PSP / Bank / System)
+    ↓
+Ingestion Service
+    ↓
+Signature Verification
+    ↓
+Canonicalization
+    ↓
+Reconciliation Engine
+    ↓
+Evidence Bundle (hash + signature)
+    ↓
+Contract Adapter
+    ↓
+Contract Event (with evidenceHash)
+    ↓
+Contract Engine (deterministic execution)
+
+
+---
+
+3. HD deterministic structure
+
+m/contracts/{tenantId}/{orgId}/{contractId}/{domain}/{version}
+
+Domains
+
+definition
+state
+events
+context
+evidence
+signatures
+disputes
+
+
+---
+
+4. Contract definition (versioned DSL)
+
+{
+  "contractId": "contract-001",
+  "version": 1,
+  "type": "service_agreement",
+  "parties": [
+    { "id": "tenant-a", "role": "provider", "pubKey": "pk_1" },
+    { "id": "merchant-001", "role": "client", "pubKey": "pk_2" }
+  ],
+  "parameters": {
+    "amount": 100,
+    "currency": "USD",
+    "deadline": "2026-06-01T00:00:00Z"
+  },
+  "states": ["draft","active","fulfilled","breached","closed","disputed","overridden"],
+  "initialState": "draft",
+  "transitions": [
+    { "from": "draft", "to": "active", "event": "contract_fully_signed" },
+    { "from": "active", "to": "fulfilled", "event": "service_delivered", "conditions": ["payment_received"] },
+    { "from": "active", "to": "breached", "event": "deadline_passed" },
+    { "from": "fulfilled", "to": "closed", "event": "finalized" }
+  ]
+}
+
+
+---
+
+5. Canonicalization and hashing
+
+definitionHash = sha256(canonicalize(definition))
+
+This hash anchors the legal terms.
+
+
+---
+
+6. Signed runtime context (critical fix)
+
+6.1 Structure
+
+{
+  "contextId": "ctx_001",
+  "contractId": "contract-001",
+  "paymentReceived": true,
+  "serviceVerified": true,
+  "currentTimestamp": "2026-05-18T12:10:00Z",
+  "evidenceRefs": [
+    "recon_hash_abc123"
+  ]
+}
+
+6.2 Enforcement
+
+contextHash = sha256(canonicalize(context))
+signature = sign(contextHash, systemKey)
+
+👉 The engine only executes if:
+
+contextHash is valid
+
+signature is valid
+
+evidenceRefs are valid
+
+
+
+---
+
+7. Event model (verified only)
+
+{
+  "eventId": "evt_001",
+  "contractId": "contract-001",
+  "type": "payment_received",
+  "payload": {
+    "amount": 100
+  },
+  "evidenceHash": "recon_hash_abc123",
+  "timestamp": "2026-05-18T12:10:00Z",
+  "signature": "sig_event"
+}
+
+
+---
+
+8. Deterministic execution engine
+
+8.1 Pure function with enforced inputs
+
+type State =
+  | "draft"
+  | "active"
+  | "fulfilled"
+  | "breached"
+  | "closed"
+  | "disputed"
+  | "overridden";
+
+function nextState(
+  definition: ContractDefinition,
+  currentState: State,
+  event: ContractEvent,
+  context: RuntimeContext
+): State {
+
+  // Reject if context is not verified
+  if (!verifyContext(context)) return currentState;
+
+  // Reject if evidence is not valid
+  if (!verifyEvidence(event.evidenceHash)) return currentState;
+
+  const transition = definition.transitions.find(
+    (t) => t.from === currentState && t.event === event.type
+  );
+
+  if (!transition) return currentState;
+
+  if (transition.conditions) {
+    for (const cond of transition.conditions) {
+      if (cond === "payment_received" && !context.paymentReceived) return currentState;
+      if (cond === "service_verified" && !context.serviceVerified) return currentState;
+    }
+  }
+
+  // Deterministic deadline check
+  const deadline = definition.parameters.deadline as string;
+  if (deadline && event.timestamp > deadline && currentState === "active") {
+    return "breached";
+  }
+
+  return transition.to;
+}
+
+
+---
+
+9. Deterministic multi-signature orchestration
+
+9.1 Signature set
+
+{
+  "requiredSigners": ["pk_1", "pk_2"],
+  "collectedSignatures": [
+    { "pubKey": "pk_2", "sig": "..." },
+    { "pubKey": "pk_1", "sig": "..." }
+  ]
+}
+
+9.2 Deterministic rule
+
+sort(signatures by pubKey)
+signatureHash = sha256(canonicalize(sortedSignatures))
+
+Transition fires only if:
+
+collectedSignatures == requiredSigners
+
+
+---
+
+10. Privacy model (corrected)
+
+10.1 Split storage
+
+sensitive data → encrypted (AES-GCM)
+
+canonical hash → public/verifiable
+
+
+10.2 Envelope encryption
+
+tenant_key → contract_key → payload_key
+
+
+---
+
+11. Evidence model (legal-grade)
+
+11.1 Evidence bundle
+
+{
+  "contractId": "contract-001",
+  "definitionHash": "abc123",
+  "stateHistory": [...],
+  "eventHistory": [...],
+  "contextHistory": [...],
+  "signatures": [...],
+  "reconciliationEvidence": ["recon_hash_abc123"],
+  "finalState": "fulfilled"
+}
+
+11.2 Chain property
+
+Each state includes:
+
+stateHash_n = sha256(state_n + stateHash_(n-1))
+
+👉 Tamper-proof chain.
+
+
+---
+
+12. Dispute model (critical addition)
+
+12.1 States
+
+disputed
+under_arbitration
+overridden
+
+12.2 Flow
+
+normal → disputed → arbitration → resolved / overridden
+
+
+---
+
+13. Legal override
+
+A court or authority can inject:
+
+{
+  "overrideId": "ovr_001",
+  "reason": "court_order",
+  "newState": "overridden",
+  "authoritySignature": "sig_court"
+}
+
+This breaks determinism intentionally but preserves traceability.
+
+
+---
+
+14. Idempotency
+
+idempotencyKey = contractId + eventId
+
+
+---
+
+15. Database schema (extended)
+
+contract_contexts
+
+context_id
+contract_id
+content_hash
+signature
+created_at
+
+disputes
+
+dispute_id
+contract_id
+status
+reason
+created_at
+resolved_at
+
+overrides
+
+override_id
+contract_id
+authority
+signature
+created_at
+
+
+---
+
+16. API
+
+POST /v1/contracts
+POST /v1/contracts/{id}/events
+POST /v1/contracts/{id}/signatures
+POST /v1/contracts/{id}/disputes
+POST /v1/contracts/{id}/override
+GET  /v1/contracts/{id}/state
+GET  /v1/contracts/{id}/evidence
+
+
+---
+
+17. Real execution flow
+
+1. Contract created → state = draft
+
+
+2. Parties sign → state = active
+
+
+3. Reconciliation confirms payment → event injected
+
+
+4. Service delivered → state = fulfilled
+
+
+5. Finalized → state = closed
+
+
+
+If conflict:
+
+→ disputed → arbitration → overridden
+
+
+---
+
+18. Integration with full system
+
+Identity Mempool → signature authority
+
+Payment Engine → economic trigger
+
+Reconciliation Engine → validated evidence
+
+Canonical Storage → persistence layer
+
+
+
+---
+
+19. What is now solved
+
+deterministic execution ✔
+
+verified inputs ✔
+
+reproducible context ✔
+
+legal-grade evidence ✔
+
+dispute handling ✔
+
+override capability ✔
+
+
+
+---
+
+20. Final thesis (corrected)
+
+> A deterministic off-chain contract engine is not just a state machine; it is a legally defensible execution system where every transition is backed by cryptographically verified inputs, reproducible context, and auditable evidence, while still allowing controlled override by real-world legal authority.
