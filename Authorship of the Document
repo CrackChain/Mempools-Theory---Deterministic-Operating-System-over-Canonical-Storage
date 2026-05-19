@@ -1,0 +1,40 @@
+# Authorship of the Document
+
+## Author Identification
+
+This protocol has been designed and formalized by:
+
+**Lerry Alexander Elizondo Villalobos**
+
+## Declaration of Authorship
+
+This document constitutes a single-author technical design work. All definitions, formal structures, system rules, and consistency models have been developed under a unified architectural line of thinking.
+
+There is no co-authorship or external participation in the conceptualization of the system described in this protocol.
+
+## Scope of the Design
+
+The author is directly responsible for:
+
+- Definition of the storage system as a deterministic abstraction
+- Design of canonical form and its invariance rules
+- Structuring of storage types and subtypes
+- Modeling of hash identifiers as a routing mechanism
+- Formalization of consistency, mutability, and immutability rules
+- Construction of the system’s functional model
+
+## Nature of the Approach
+
+The design is based on an abstract architecture oriented toward:
+
+- Computational determinism
+- Implementation independence
+- Semantic consistency
+- State reproducibility
+- Canonical data structuring
+
+## Uniqueness Condition
+
+The entire conceptual structure of the system is considered unified under a single design source, ensuring internal coherence and logical continuity across all definitions.
+
+---
