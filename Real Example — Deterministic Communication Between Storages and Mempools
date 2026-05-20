@@ -1,0 +1,492 @@
+#Example — Deterministic Communication Between Storages and Mempools
+
+#Mempools Theory by LAEV
+
+Author: Lerry Alexander Elizondo Villalobos (LAEV)
+Copyright: © 2026 Lerry Alexander Elizondo Villalobos (LAEV). All rights reserved.
+
+
+---
+
+1. Purpose
+
+This example defines a minimal, corrected, and updated implementation of deterministic communication between two independent storage systems, where:
+
+all communication is expressed in canonical hashes,
+
+authorization is defined by public lists of hash identities,
+
+execution occurs in mempools with private identity,
+
+HD/BIP32 derivation defines deterministic state routes,
+
+the full flow is reproducible, traceable, and verifiable.
+
+
+
+---
+
+2. Model Principles
+
+1. All communication is sent in hashes.
+
+
+2. A hash identifies but does not describe.
+
+
+3. Storage identity is public.
+
+
+4. Mempool identity is private.
+
+
+5. Execution occurs only if identity and context are authorized.
+
+
+6. Each state transition produces a verifiable witness hash.
+
+
+7. Semantics are not part of the channel; structural validity is.
+
+
+
+
+---
+
+3. Canonical Identities
+
+3.1 Public Storage Identity
+
+Each storage has a public identity derived from canonical configuration.
+
+const STORAGE_A_CONFIG = canonicalize({
+  system: "storage",
+  name: "A",
+  role: "client",
+  version: "1.0"
+});
+
+const STORAGE_B_CONFIG = canonicalize({
+  system: "storage",
+  name: "B",
+  role: "server",
+  version: "1.0"
+});
+
+const STORAGE_A_ID = H(STORAGE_A_CONFIG);
+const STORAGE_B_ID = H(STORAGE_B_CONFIG);
+
+
+---
+
+3.2 Private Mempool Identity
+
+Each mempool has an internal identity, not exposed as a network public identity.
+
+const MEMPOOL_A_STATE = canonicalize({
+  system: "mempool",
+  owner: STORAGE_A_ID,
+  mode: "private-executor",
+  version: "1.0"
+});
+
+const MEMPOOL_B_STATE = canonicalize({
+  system: "mempool",
+  owner: STORAGE_B_ID,
+  mode: "private-executor",
+  version: "1.0"
+});
+
+const MEMPOOL_A_ID = H(MEMPOOL_A_STATE);
+const MEMPOOL_B_ID = H(MEMPOOL_B_STATE);
+
+
+---
+
+4. Canonical Permission List
+
+Authorization is expressed as a public list of canonical hashes. The list contains only valid identities and allowed types.
+
+{
+  "canonical_permissions": {
+    "storage_b": {
+      "allowed_storage_ids": [
+        "H(STORAGE_A_CONFIG)"
+      ],
+      "allowed_request_types": [
+        "H(REQUEST_HELLO)"
+      ],
+      "allowed_mempool_ids": [
+        "H(MEMPOOL_A_STATE)"
+      ]
+    },
+    "storage_a": {
+      "allowed_storage_ids": [
+        "H(STORAGE_B_CONFIG)"
+      ],
+      "allowed_request_types": [
+        "H(RESPONSE_HELLO_WORLD)"
+      ],
+      "allowed_mempool_ids": [
+        "H(MEMPOOL_B_STATE)"
+      ]
+    }
+  }
+}
+
+Rule
+
+H(STORAGE_A_ID) ∈ STORAGE_B.allowed_storage_ids
+H(MEMPOOL_A_ID) ∈ STORAGE_B.allowed_mempool_ids
+
+Only if both conditions are true can the request proceed.
+
+
+---
+
+5. Message Canonicalization
+
+Communication does not send free text; it sends canonical structures represented as hashes.
+
+
+---
+
+5.1 Request
+
+const REQUEST = canonicalize({
+  type: "REQUEST_HELLO",
+  payload: "HELLO",
+  context: "production",
+  protocol: "LCCP",
+  sequence: 3
+});
+
+const REQUEST_HASH = H(REQUEST);
+
+
+---
+
+5.2 OK / Validation
+
+The OK response is not plain text. It is a hash confirming validation.
+
+const OK_MESSAGE = canonicalize({
+  type: "OK",
+  status: "OK",
+  request_hash: REQUEST_HASH
+});
+
+const OK_HASH = H(OK_MESSAGE);
+
+
+---
+
+5.3 Response
+
+const RESPONSE = canonicalize({
+  type: "HELLO_WORLD",
+  payload: "HELLO_WORLD",
+  request_hash: REQUEST_HASH,
+  status: "EXECUTED"
+});
+
+const RESPONSE_HASH = H(RESPONSE);
+
+
+---
+
+6. Transition Witness
+
+Each state change produces a verifiable transition hash.
+
+function transitionWitness(previousStateHash: string, operationHash: string, nextStateHash: string): string {
+  return H(canonicalize({
+    previous_state_hash: previousStateHash,
+    operation_hash: operationHash,
+    next_state_hash: nextStateHash
+  }));
+}
+
+Purpose
+
+preserve traceability
+
+link consecutive states
+
+avoid execution ambiguity
+
+enable session reconstruction
+
+
+
+---
+
+7. HD / BIP32 Derivation as Deterministic Routing
+
+HD derivation is used not as wallet logic but as state and authorization routing.
+
+
+---
+
+7.1 Global Context
+
+const NETWORK_CONTEXT = H(canonicalize({
+  environment: "production",
+  domain: "deterministic-storage",
+  protocol: "LCCP"
+}));
+
+
+---
+
+7.2 Derivation Path
+
+m / context / storage_a / storage_b / request_id / state
+
+
+---
+
+7.3 Example
+
+m / H(context) / H(STORAGE_A_ID) / H(STORAGE_B_ID) / H(REQUEST_HASH) / 0  -> REQUEST
+m / H(context) / H(STORAGE_A_ID) / H(STORAGE_B_ID) / H(REQUEST_HASH) / 1  -> OK
+m / H(context) / H(STORAGE_A_ID) / H(STORAGE_B_ID) / H(REQUEST_HASH) / 2  -> RESPONSE
+
+Rule
+
+The derived path is a deterministic session index. It is not semantically interpreted; only structurally verified.
+
+
+---
+
+8. Finite State Machine (FSM)
+
+8.1 Program A — Storage A / Mempool A
+
+A0: IDLE
+A1: REQUEST_CREATED
+A2: WAITING_OK
+A3: WAITING_RESPONSE
+A4: DONE
+A5: ERROR
+
+Transitions:
+
+A0 --create_request--> A1
+A1 --send_request_hash--> A2
+A2 --receive_ok_hash--> A3
+A3 --receive_response_hash--> A4
+A* --timeout / invalid_hash / reject--> A5
+
+
+---
+
+8.2 Program B — Storage B / Mempool B
+
+B0: IDLE
+B1: REQUEST_RECEIVED
+B2: VALIDATED
+B3: EXECUTED
+B4: RESPONDED
+B5: ERROR
+
+Transitions:
+
+B0 --receive_request_hash--> B1
+B1 --validate_permissions--> B2
+B2 --execute_request--> B3
+B3 --emit_response_hash--> B4
+B* --timeout / invalid_permission / invalid_context--> B5
+
+
+---
+
+9. Full Deterministic Flow
+
+1. A canonicalizes REQUEST.
+2. A computes REQUEST_HASH.
+3. A derives request_id via BIP32.
+4. A sends REQUEST_HASH to B.
+5. B verifies:
+   - STORAGE_A_ID ∈ allowed_storage_ids
+   - MEMPOOL_A_ID ∈ allowed_mempool_ids
+   - REQUEST_HASH ∈ allowed_request_types
+   - context hash valid
+6. If valid, B emits OK_HASH.
+7. B executes authorized logic.
+8. B generates RESPONSE_HASH.
+9. A receives RESPONSE_HASH.
+10. Both record transition witness.
+
+
+---
+
+10. Canonical Callback Table
+
+The mempool acts as a pure execution router.
+
+const EXECUTION_TABLE: Record<string, (request: any) => any> = {
+  [H("REQUEST_HELLO")]: (request) => ({
+    type: "HELLO_WORLD",
+    payload: "HELLO_WORLD",
+    request_hash: H(request),
+    status: "EXECUTED"
+  })
+};
+
+Rule
+
+The mempool does not interpret full message semantics. It only verifies:
+
+request type hash
+
+authorized identity hash
+
+context hash
+
+canonical structure hash
+
+
+
+---
+
+11. Deterministic Timeout Handling
+
+Timeout is not based on real time but deterministic cycles.
+
+function shouldTimeout(stepCount: number, maxSteps: number): boolean {
+  return stepCount >= maxSteps;
+}
+
+Recovery State
+
+PENDING_TIMEOUT -> RECOVERY_PATH -> RETRY or ERROR
+
+Recovery Route
+
+m / context / storage_a / storage_b / request_hash / recovery / n
+
+
+---
+
+12. Session Memory
+
+Session reconstruction is derived from:
+
+master seed
+
+canonical context
+
+request hash
+
+witness chain
+
+state counter
+
+
+const MASTER_SEED = H("LAEV_DETERMINISTIC_ROOT_SEED");
+
+No heavy history storage is required if full derivation is possible.
+
+
+---
+
+13. Error States
+
+enum ErrorState {
+  INVALID_IDENTITY,
+  INVALID_CONTEXT,
+  INVALID_HASH,
+  INVALID_PERMISSION,
+  INVALID_MEMPOOL,
+  TIMEOUT,
+  REJECTED
+}
+
+
+---
+
+14. System Guarantees
+
+This example guarantees:
+
+hash-only communication
+
+public storage identity
+
+private mempool identity
+
+permission via canonical lists
+
+deterministic routing via HD derivation
+
+traceability via witness hashes
+
+full session reproducibility
+
+strict separation of identity, permission, and execution
+
+
+
+---
+
+15. Minimal Implementation Version
+
+function canonicalize(input: unknown): string {
+  return JSON.stringify(input, Object.keys(input as object).sort());
+}
+
+function H(value: string): string {
+  // Canonical placeholder. Replace with SHA-256 in real implementation.
+  return `hash(${value})`;
+}
+
+function processRequest(request: unknown) {
+  const canonicalRequest = canonicalize(request);
+  const requestHash = H(canonicalRequest);
+
+  const requestId = H(canonicalize({
+    context: NETWORK_CONTEXT,
+    storageA: STORAGE_A_ID,
+    storageB: STORAGE_B_ID,
+    requestHash
+  }));
+
+  const validPermission =
+    [STORAGE_A_ID].includes(H(STORAGE_A_CONFIG)) &&
+    [MEMPOOL_A_ID].includes(H(MEMPOOL_A_STATE));
+
+  if (!validPermission) {
+    throw new Error("INVALID_PERMISSION");
+  }
+
+  const response = EXECUTION_TABLE[H("REQUEST_HELLO")](request);
+
+  return {
+    requestId,
+    requestHash,
+    responseHash: H(canonicalize(response)),
+    response
+  };
+}
+
+
+---
+
+16. Author Signature
+
+Designed, defined, and authored by:
+Lerry Alexander Elizondo Villalobos (LAEV)
+Alias: byLAEV
+
+This work is part of the LAEV Mempools Theory framework.
+All rights reserved. © 2026 Lerry Alexander Elizondo Villalobos (LAEV)
+
+
+---
+
+17. Closing Statement
+
+This example converts a simple request/response handshake into a deterministic storage-to-storage protocol where every meaningful communication event is represented as a canonical hash, every execution path is derivable, and every permission is explicitly encoded in the system’s identity layer.
+
+With binary security seal identity by LAEV added.
